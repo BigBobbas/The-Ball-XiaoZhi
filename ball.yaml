@@ -1,3 +1,4 @@
+
 ## You can change the friendly name if you wish on line 7 below. The friendly name is how the device will show in HA
 ## However the <name:> is how HA connects to the device eg. the-ball.local is the mDNS hostname for the device.
 ## Once added to HA changing the device name can lead to connection issues, between HA and the device.
@@ -134,18 +135,25 @@ wifi:
     - script.execute: draw_display
 
 captive_portal:
-
+external_components:
+  - source: github://pr#9605
+    components: [lvgl]
+    refresh: 1h
 time:
-  - platform: homeassistant
-    id: ha_time
+  - platform: sntp
+    id: time_comp
+    servers:
+     - ntp0.ntp-servers.net
+     - ntp1.ntp-servers.net
+     - ntp2.ntp-servers.net
     on_time_sync:
-      - lvgl.label.update:
-          id: display_time_blank
-          text: !lambda |-
-            static char time_buf[16];
-            auto now = id(ha_time).now();            
-            snprintf(time_buf, sizeof(time_buf), "%02d:%02d", now.hour, now.minute);
-            return time_buf;
+      - script.execute: time_update
+    on_time:
+      - minutes: '*'
+        seconds: 0
+        then:
+          - script.execute: time_update
+
 button:
   - platform: restart
     id: reboot
@@ -638,7 +646,40 @@ script:
             - lambda: id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
           else:
             - lambda: id(voice_assistant_phase) = ${voice_assist_muted_phase_id};
+  - id: time_update
+    then:
+      - lvgl.indicator.update:
+          id: minute_hand
+          value: !lambda |-
+            return id(time_comp).now().minute;
+      - lvgl.indicator.update:
+          id: hour_hand
+          value: !lambda |-
+            auto now = id(time_comp).now();
+            return std::fmod(now.hour, 12) * 60 + now.minute;
+      - lvgl.label.update:
+          id: date_label
+          text: !lambda |-
+            static const char * const mon_names[] = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
+            static char date_buf[8];
+            auto now = id(time_comp).now();
+            snprintf(date_buf, sizeof(date_buf), "%s %2d", mon_names[now.month-1], now.day_of_month);
+            return date_buf;
+      - lvgl.label.update:
+          id: day_label
+          text: !lambda |-
+            static const char * const day_names[] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
+            return day_names[id(time_comp).now().day_of_week - 1];
 
+      - lvgl.label.update:
+          id: display_time_blank
+          text: !lambda |-
+            static char time_buf[16];
+            auto now = id(time_comp).now();            
+            snprintf(time_buf, sizeof(time_buf), "%02d:%02d", now.hour, now.minute);
+            return time_buf;    
+
+     
 switch:
   - platform: template
     name: Mute
@@ -691,6 +732,27 @@ switch:
     id: speaker_enable
     pin: GPIO46
     restore_mode: ALWAYS_ON
+
+  - platform: template
+    id: clock_type
+    name: Digital / Analogue
+    restore_mode: ALWAYS_ON
+    entity_category: config
+    icon: "mdi:clock"
+    on_turn_off: 
+      - lvgl.widget.hide: analogue_clock
+      - lvgl.widget.show: digital_clock
+      - lvgl.label.update:
+          id: display_time_blank
+          text: !lambda |-
+            static char time_buf[16];
+            auto now = id(time_comp).now();            
+            snprintf(time_buf, sizeof(time_buf), "%02d:%02d", now.hour, now.minute);
+            return time_buf;
+    on_turn_on:
+      - lvgl.widget.show: analogue_clock
+      - lvgl.widget.hide: digital_clock
+    optimistic: true
 
 select:
   - platform: template
@@ -990,6 +1052,7 @@ lvgl:
     - id: idle_page
       widgets:
         - obj: 
+            id: digital_clock
             styles: main_content
             border_width: 0
             bg_color: black
@@ -1001,21 +1064,74 @@ lvgl:
                   text_font: montserrat_48
                   text_align: CENTER
                   text_color: white
-                  text: "loading"
+                  text: "Loading"
 
-
-    # - id: idle_page
-      # widgets:
-        # - obj: 
-            # styles: main_content
-            # border_width: 0
-            # # bg_color: black
-            # text_color: white
-            # widgets:
-               # - image:
-                  # align: CENTER
-                  # src: casita_idle
-                  # id: casita_idle_lvgl           
+        - obj: 
+            id: analogue_clock
+            height: 240
+            width: 240
+            align: CENTER
+            pad_all: 0
+            border_width: 0
+            bg_color: black
+            widgets:
+              - meter: # clock face
+                  height: 240
+                  width: 240
+                  align: CENTER
+                  bg_opa: TRANSP
+                  border_width: 0
+                  text_color: white
+                  scales:
+                    - range_from: 0 # minutes scale
+                      range_to: 60
+                      angle_range: 360
+                      rotation: 270
+                      ticks:
+                        width: 1
+                        count: 61
+                        length: 10
+                        color: white
+                      indicators:
+                        - line:
+                            id: minute_hand
+                            width: 4
+                            color: white
+                            r_mod: -4
+                            value: 0
+                    - range_from: 1 # hours scale for labels
+                      range_to: 12
+                      angle_range: 330
+                      rotation: 300
+                      ticks:
+                        width: 1
+                        count: 12
+                        length: 1
+                        major:
+                          stride: 1
+                          width: 4
+                          length: 10
+                          color: white
+                          label_gap: 12
+                    - range_from: 0 # hi-res hours scale for hand
+                      range_to: 720
+                      angle_range: 360
+                      rotation: 270
+                      ticks:
+                        count: 0
+                      indicators:
+                        - line:
+                            id: hour_hand
+                            width: 6
+                            color: white
+                            r_mod: -30
+                            value: 0
+              - label:
+                  id: day_label
+                  y: 55
+              - label:
+                  id: date_label
+                  y: 155         
 
     - id: listening_page
       widgets:
@@ -1122,4 +1238,3 @@ lvgl:
                   id: casita_initializing_lvgl
 
     - id: muted_page
-
