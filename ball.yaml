@@ -17,7 +17,7 @@ substitutions:
   thinking_illustration_file: https://github.com/BigBobbas/ESP32-S3-Box3-Custom-ESPHome/raw/main/images/thinking.png
   replying_illustration_file: https://github.com/BigBobbas/ESP32-S3-Box3-Custom-ESPHome/raw/main/images/replying.png
   error_illustration_file: https://github.com/BigBobbas/ESP32-S3-Box3-Custom-ESPHome/raw/main/images/error.png
-  timer_finished_illustration_file: https://github.com/esphome/wake-word-voice-assistants/raw/main/casita/timer_finished_320_240.png
+  timer_finished_illustration_file: https://github.com/BigBobbas/The-Ball-XiaoZhi/raw/Dev/images/timer.png
   logo_illustration_file: https://github.com/BigBobbas/ESP32-S3-Box3-Custom-ESPHome/raw/main/images/logo.png
 
   loading_illustration_background_color: "000000"
@@ -134,11 +134,6 @@ wifi:
   on_disconnect:
     - script.execute: draw_display
 
-captive_portal:
-external_components:
-  - source: github://pr#9605
-    components: [lvgl]
-    refresh: 1h
 time:
   - platform: sntp
     id: time_comp
@@ -166,31 +161,10 @@ binary_sensor:
       number: 0
       mode: INPUT_PULLUP
       inverted: true
-    id: left_top_button
+    id: left_button
     internal: true
-    # on_multi_click:
-      # - timing:
-          # - ON for at least 50ms
-          # - OFF for at least 50ms
-        # then:
-          # - if:
-              # condition:
-                # switch.is_on: timer_ringing
-              # then:
-                # - switch.turn_off: timer_ringing
-              # else:
-                # - if:
-                    # condition:
-                      # not:
-                        # voice_assistant.is_running:
-                    # then:
-                      # - voice_assistant.start:                     
-                    # else:
-                      # - voice_assistant.stop:                     
-      # - timing:
-          # - ON for at least 10s
-        # then:
-          # - button.press: factory_reset_btn
+    on_click:
+      switch.turn_off: timer_ringing
  
 
 output:
@@ -713,8 +687,16 @@ switch:
       # Stop playing the alarm
       - media_player.stop:
           announcement: true
+      - light.turn_off: led
     on_turn_on:
       # Turn on the repeat mode and pause for 1000 ms between playlist items/repeats
+      - light.turn_on:
+          id: led           
+          red: 100%
+          green: 0%
+          blue: 0%
+          brightness: 100%
+          effect: fast pulse
       - lambda: |-
             id(speaker_media_player)
               ->make_call()
@@ -1177,13 +1159,15 @@ lvgl:
         - obj: 
             styles: main_content
             border_width: 0
-            # bg_color: black
+            bg_color: black
             text_color: white
             widgets:
                - image:
                   align: CENTER
                   src: casita_timer_finished
                   id: timer_finished_lvgl
+            on_click:
+              switch.turn_off: timer_ringing
 
     - id: error_page
       widgets:
