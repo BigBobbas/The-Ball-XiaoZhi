@@ -164,8 +164,13 @@ binary_sensor:
     id: left_button
     internal: true
     on_click:
-      switch.turn_off: timer_ringing
- 
+      if:
+        condition:
+          switch.is_on: timer_ringing
+        then:
+          switch.turn_off: timer_ringing
+        else: 
+          button.press: reboot
 
 output:
   - platform: ledc
