@@ -1,0 +1,159 @@
+esphome:
+  platformio_options:
+    lib_deps:
+      - https://github.com/bitbank2/JPEGDEC.git#ca1e0f2 
+esp32:
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_SPIRAM_RODATA: y
+      CONFIG_FATFS_LFN_STACK: "y"
+      CONFIG_LWIP_SO_RCVBUF: "y"
+      CONFIG_LWIP_MAX_SOCKETS: "16"
+      CONFIG_SPIRAM_USE_CAPS_ALLOC: y
+      CONFIG_SPIRAM_USE_MALLOC: y
+      CONFIG_ESP_MAIN_TASK_STACK_SIZE: "16384"  # Augmente à 16KB
+      CONFIG_ESP_TIMER_TASK_STACK_SIZE: "4096"
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "60"       # 60 secondes de timeout
+      CONFIG_ESP_TASK_LOOP_STACK_SIZE: "16384"   # <-- à ajouter
+      DCONFIG_ESP_JPG_DECODE_ENABLE: "y"
+      DCONFIG_ESPHOME_ENABLE_PNGLE: "1"
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/youkorr/sd_mmc_card
+      ref: main
+    components: [sd_mmc_card, webdavbox3]
+    refresh: 0s  
+
+  - source:
+      type: git
+      url: https://github.com/youkorr/sd_image
+      ref: main
+    components: [storage]
+    refresh: 1min   
+
+
+number:
+  - platform: template
+    name: "Slideshow Interval"
+    id: slideshow_interval
+    optimistic: true
+    restore_value: true
+    min_value: 1
+    max_value: 30
+    step: 1
+    unit_of_measurement: "s"
+    icon: 'mdi:timer'
+    initial_value: 5
+
+webdavbox3:
+  id: sd_cards
+  root_path: "/sdcard"
+  url_prefix: "/"
+  port: 81
+  username: "admin"
+  password: "admin"
+storage:
+    platform: sd_direct
+    id: my_storage
+    sd_component: sd_card
+    root_path: "/sdcard" 
+    sd_images:    
+      - id: slideshow_image
+        file_path: "/photos/pic1.jpg"
+        format: RGB565
+        byte_order: big_endian
+        resize: 800x480
+        auto_load: true
+sd_mmc_card:
+  id: sd_card
+  clk_pin: GPIO12
+  cmd_pin: GPIO11
+  data0_pin: GPIO13
+  mode_1bit: true
+
+script:
+  - id: start_slideshow
+    then:
+      - lambda: |
+          id(slideshow_active) = true;
+          id(current_image_index) = 1;
+      - component.resume: slide_interval
+      - sd_image.load:
+          id: slideshow_image
+          file_path: "/photos/pic1.jpg"
+  - id: stop_slideshow
+    then:
+      - lambda: |
+          id(slideshow_active) = false;
+      - component.suspend: slide_interval
+interval:
+  - interval: 1s
+    id: slide_interval
+    then:
+      - if:
+          condition:
+            lambda: 'return id(slideshow_active) && id(max_images) > 0;'
+          then:
+            - lambda: |-
+                static int counter = 0;
+                counter++;
+                if (counter < id(slideshow_interval).state) return;  // récupérer la valeur du number
+                counter = 0;
+
+                int current = id(current_image_index);
+                current++;
+                if (current > id(max_images)) {
+                  current = 1;  // Retour au début
+                }
+                id(current_image_index) = current;
+                
+                std::string filename = "/photos/pic" + std::to_string(current) + ".jpg";
+                ESP_LOGI("slideshow", "Chargement image: %s", filename.c_str());
+
+            - sd_image.load:
+                id: slideshow_image
+                file_path: !lambda |
+                  return "/photos/pic" + std::to_string(id(current_image_index)) + ".jpg";
+
+            - lvgl.image.update:
+                id: update_photo
+                src: slideshow_image
+globals:
+  - id: photo_index
+    type: int
+    restore_value: no
+    initial_value: '1'
+  - id: current_image_index
+    type: int
+    initial_value: '1'
+  - id: max_images
+    type: int
+    initial_value: '400'
+  - id: slideshow_active
+    type: bool
+    initial_value: 'false'  # Démarre en pause
+  - id: slideshow_delay
+    type: int
+    initial_value: '5000'   # en ms (5s)
+image:
+lvgl:
+  - id: photo_page
+    on_load:
+      script.execute: start_slideshow
+    bg_color: black
+    widgets:
+      - image:
+          id: update_photo
+          src: slideshow_image
+          width: 800
+          height: 480
+          x: 0
+          y: 0 
+   
+    on_swipe_up:
+      - lambda: 'lv_indev_wait_release(lv_indev_get_act());'
+      - script.stop: stop_slideshow
+      - lvgl.page.show: main_page
